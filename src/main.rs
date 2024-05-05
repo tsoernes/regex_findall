@@ -27,10 +27,9 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::path::PathBuf;
 use time::PreciseTime;
-// use tokenizers::models::bpe::BPE;
-// use tokenizers::tokenizer::{EncodeInput, Result, Tokenizer};
 
 fn get_paths(dir: &Path, glob_pattern: &str) -> Vec<PathBuf> {
+    // Glob a directory and return a vector of paths.
     let glob_pattern = dir.join(glob_pattern);
     let globs = glob(glob_pattern.to_str().unwrap()).unwrap();
     let file_paths: Vec<PathBuf> = globs.filter_map(|p| p.ok()).collect();
@@ -46,6 +45,8 @@ fn main() -> std::io::Result<()> {
     let glassdoor_root = Path::new("/home/torstein/code/fintechdb/Jobs/glassdoor");
     let tags_path = glassdoor_root.join("tags.json");
 
+    let n_rows = 10_000;
+
     // Construct regex for searching descriptions for tags
     let mut file = File::open(&tags_path).unwrap();
     let mut buff = String::new();
@@ -56,14 +57,15 @@ fn main() -> std::io::Result<()> {
         .iter()
         .map(|tag| [r"\b", &escape(tag), r"\b"].concat())
         .collect();
+    // Allow case insensitivity and join all tags together to a single regex
     let rex = [r"(?i)(", &re_tags.join("|"), ")"].concat();
     let regex = Regex::new(&rex).unwrap();
 
     let (rows, schema) = read_parquet(&in_path);
     println!("Schema {:?}", schema);
-    let rows: Vec<Row> = rows.into_iter().take(10_000).collect();
+    let rows: Vec<Row> = rows.into_iter().take(n_rows).collect();
 
-    let id_to_tags = find_tags(&rows, regex);
+    let id_to_tags = find_tags(&rows, regex, None);
     to_json(id_to_tags, &out_path)?;
 
     let regex = Regex::new(r"(\w+)").unwrap();
@@ -128,10 +130,10 @@ fn to_json<T: Sized + Serialize>(data: T, out_path: &Path) -> std::io::Result<()
 fn find_tags(
     rows: &Vec<Row>,
     regex: Regex,
-    tag_set: &HashSet<String>,
+    tag_set: Option<&HashSet<String>>,
 ) -> HashMap<i64, Vec<String>> {
     // Find all tags matching the given `regex` in a list of job descriptions.
-    // Only tags contained in the given `tag_set` is retained.
+    // If a tag set is given, only tags contained in the given `tag_set` is retained.
     // Return a dictionary mapping each listing ID to a list of tags.
 
     // Dictionary mapping every listing ID to a list of tags
@@ -144,11 +146,17 @@ fn find_tags(
                     // For each job description, search for tags
 
                     let desc = desc.replace(r"\\n", "");
-                    let tags: Vec<String> = regex
+                    let tags_iter = regex
                         .find_iter(&desc)
                         .map(|m| m.as_str().to_owned())
-                        .filter(|w| tag_set.contains(w))
-                        .collect();
+                    match tag_set {
+                        Some(tag_set_) => {
+                            let tags_iter = tags_iter.filter(|w| tag_set.contains(w))
+                        },
+                        _ => {}
+                    }
+
+                    let tags: Vec<String> = tags_iter.collect();
 
                     let id = record.get_long(1).unwrap();
                     Some((id, tags))
