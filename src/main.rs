@@ -11,15 +11,16 @@ use regex::Regex;
 use serde::ser::Serialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::env::current_dir;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use time::PreciseTime;
+use time::OffsetDateTime;
 
 fn main() -> std::io::Result<()> {
-    let start_time = PreciseTime::now();
+    let start_time = OffsetDateTime::now_utc();
 
-    let data_dir = Path::new("/tmp");
+    let data_dir = current_dir().unwrap().join("data");
     let in_path = data_dir.join("job_desc.parquet");
     let out_path = data_dir.join("job_tags.json");
     let glassdoor_dir = Path::new("/home/torstein/code/fintechdb/Jobs/glassdoor");
@@ -53,20 +54,20 @@ fn main() -> std::io::Result<()> {
     let id_to_tags = find_tags(&rows, regex, Some(&tag_set));
     to_json(id_to_tags, &out_path)?;
 
-    let diff_time = start_time.to(PreciseTime::now());
-    println!("Finished in {} seconds", diff_time);
+    let diff_time = OffsetDateTime::now_utc() - start_time;
+    println!("Finished in {}", diff_time);
 
     Ok(())
 }
 
 fn read_parquet(in_path: &Path) -> (Vec<Row>, TypePtr) {
-    // Read Parquet input file with job description.
+    // Read Parquet input file.
     // Returns a vector of rows, and the schema.
     let file = File::open(in_path).unwrap();
     let reader = SerializedFileReader::new(file).unwrap();
     let row_iter = reader.get_row_iter(None).unwrap();
     let num_rows = reader.metadata().file_metadata().num_rows();
-    let rows: Vec<Row> = row_iter.collect();
+    let rows: Vec<Row> = row_iter.into_iter().map(Result::unwrap).collect();
     println!("Read {} rows from {}", num_rows, in_path.display());
 
     let schema = reader
